@@ -74,7 +74,6 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	stdLog "log"
@@ -149,6 +148,11 @@ func (s *severity) Set(value string) error {
 	}
 	logging.stderrThreshold.set(threshold)
 	return nil
+}
+
+// Type is part of the pflag.Value interface.
+func (s *severity) Type() string {
+	return "severity"
 }
 
 func severityByName(s string) (severity, bool) {
@@ -235,6 +239,11 @@ func (l *Level) Set(value string) error {
 	return nil
 }
 
+// Type is part of the pflag.Value interface.
+func (l *Level) Type() string {
+	return "Level"
+}
+
 // moduleSpec represents the setting of the -vmodule flag.
 type moduleSpec struct {
 	filter []modulePat
@@ -276,6 +285,11 @@ func (m *moduleSpec) String() string {
 // struct is not exported.
 func (m *moduleSpec) Get() interface{} {
 	return nil
+}
+
+// Type is part of the pflag.Value interface.
+func (m *moduleSpec) Type() string {
+	return "moduleSpec"
 }
 
 var errVmoduleSyntax = errors.New("syntax error: expect comma-separated list of filename=N")
@@ -388,6 +402,11 @@ func (t *traceLocation) Set(value string) error {
 	return nil
 }
 
+// Type is part of the pflag.Value interface.
+func (t *traceLocation) Type() string {
+	return "traceLocation"
+}
+
 // flushSyncWriter is the interface satisfied by logging destinations.
 type flushSyncWriter interface {
 	Flush() error
@@ -396,15 +415,20 @@ type flushSyncWriter interface {
 }
 
 func init() {
-	flag.BoolVar(&logging.toStderr, "logtostderr", false, "log to standard error instead of files")
-	flag.BoolVar(&logging.alsoToStderr, "alsologtostderr", false, "log to standard error as well as files")
-	flag.Var(&logging.verbosity, "v", "log level for V logs")
-	flag.Var(&logging.stderrThreshold, "stderrthreshold", "logs at or above this threshold go to stderr")
-	flag.Var(&logging.vmodule, "vmodule", "comma-separated list of pattern=N settings for file-filtered logging")
-	flag.Var(&logging.traceLocation, "log_backtrace_at", "when logging hits line file:N, emit a stack trace")
+	//flag.BoolVar(&logging.toStderr, "logtostderr", false, "log to standard error instead of files")
+	//flag.BoolVar(&logging.alsoToStderr, "alsologtostderr", true, "log to standard error as well as files")
+	//flag.Var(&logging.verbosity, "v", "log level for V logs")
+	//flag.Var(&logging.stderrThreshold, "stderrthreshold", "logs at or above this threshold go to stderr")
+	//flag.Var(&logging.vmodule, "vmodule", "comma-separated list of pattern=N settings for file-filtered logging")
+	//flag.Var(&logging.traceLocation, "log_backtrace_at", "when logging hits line file:N, emit a stack trace")
+	logging.toStderr = false
+	logging.alsoToStderr = true
+	logging.verbosity = Level(0)
+	logging.stderrThreshold = errorLog
+	logging.vmodule.Set("")
+	logging.traceLocation.Set("")
 
 	// Default stderrThreshold is ERROR.
-	logging.stderrThreshold = errorLog
 
 	logging.setVState(0, nil, false)
 	go logging.flushDaemon()
@@ -559,24 +583,32 @@ func (l *loggingT) formatHeader(s severity, file string, line int) *buffer {
 
 	// Avoid Fprintf, for speed. The format is so simple that we can do it quickly by hand.
 	// It's worth about 3X. Fprintf is hard.
-	_, month, day := now.Date()
+	year, month, day := now.Date()
 	hour, minute, second := now.Clock()
 	// Lmmdd hh:mm:ss.uuuuuu threadid file:line]
-	buf.tmp[0] = severityChar[s]
-	buf.twoDigits(1, int(month))
-	buf.twoDigits(3, day)
-	buf.tmp[5] = ' '
-	buf.twoDigits(6, hour)
-	buf.tmp[8] = ':'
-	buf.twoDigits(9, minute)
-	buf.tmp[11] = ':'
-	buf.twoDigits(12, second)
-	buf.tmp[14] = '.'
-	buf.nDigits(6, 15, now.Nanosecond()/1000, '0')
-	buf.tmp[21] = ' '
-	buf.nDigits(7, 22, pid, ' ') // TODO: should be TID
-	buf.tmp[29] = ' '
-	buf.Write(buf.tmp[:30])
+	for i := 0; i < 9; i++ {
+		buf.tmp[i] = ' '
+	}
+	for i := 0; i < len(severityName[s]); i++ {
+		buf.tmp[i] = severityName[s][i]
+	}
+	buf.nDigits(4, 9, int(year), ' ')
+	buf.tmp[13] = '-'
+	buf.twoDigits(14, int(month))
+	buf.tmp[16] = '-'
+	buf.twoDigits(17, day)
+	buf.tmp[19] = ' '
+	buf.twoDigits(20, hour)
+	buf.tmp[22] = ':'
+	buf.twoDigits(23, minute)
+	buf.tmp[25] = ':'
+	buf.twoDigits(26, second)
+	buf.tmp[28] = '.'
+	buf.nDigits(6, 29, now.Nanosecond()/1000, '0')
+	buf.tmp[35] = ' '
+	buf.nDigits(7, 36, pid, ' ') // TODO: should be TID
+	buf.tmp[43] = ' '
+	buf.Write(buf.tmp[:44])
 	buf.WriteString(file)
 	buf.tmp[0] = ':'
 	n := buf.someDigits(1, line)
@@ -646,6 +678,15 @@ func (l *loggingT) printDepth(s severity, depth int, args ...interface{}) {
 	l.output(s, buf, file, line, false)
 }
 
+func (l *loggingT) printfDepth(s severity, format string, depth int, args ...interface{}) {
+	buf, file, line := l.header(s, depth)
+	fmt.Fprintf(buf, format, args...)
+	if buf.Bytes()[buf.Len()-1] != '\n' {
+		buf.WriteByte('\n')
+	}
+	l.output(s, buf, file, line, false)
+}
+
 func (l *loggingT) printf(s severity, format string, args ...interface{}) {
 	buf, file, line := l.header(s, 0)
 	fmt.Fprintf(buf, format, args...)
@@ -676,10 +717,11 @@ func (l *loggingT) output(s severity, buf *buffer, file string, line int, alsoTo
 		}
 	}
 	data := buf.Bytes()
-	if !flag.Parsed() {
-		os.Stderr.Write([]byte("ERROR: logging before flag.Parse: "))
-		os.Stderr.Write(data)
-	} else if l.toStderr {
+	//if !flag.Parsed() {
+	//  os.Stderr.Write([]byte("ERROR: logging before flag.Parse: "))
+	//	os.Stderr.Write(data)
+	//} else
+	if l.toStderr {
 		os.Stderr.Write(data)
 	} else {
 		if alsoToStderr || l.alsoToStderr || s >= l.stderrThreshold.get() {
