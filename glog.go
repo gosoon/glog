@@ -422,7 +422,7 @@ func init() {
 	//flag.Var(&logging.vmodule, "vmodule", "comma-separated list of pattern=N settings for file-filtered logging")
 	//flag.Var(&logging.traceLocation, "log_backtrace_at", "when logging hits line file:N, emit a stack trace")
 	logging.toStderr = false
-	logging.alsoToStderr = true
+	logging.alsoToStderr = false
 	logging.verbosity = Level(0)
 	logging.stderrThreshold = errorLog
 	logging.vmodule.Set("")
